@@ -1,0 +1,122 @@
+# Set seed for reproducibility
+set.seed(1234)
+n_species <- 30
+# Create groups
+control <- matrix(
+rpois(n_species * 20, lambda = runif(n_species, 10, 50)),
+nrow = 20, ncol = n_species
+)
+case <- control
+up_species <- sample(1:n_species, size = n_species/2)
+case[, up_species] <- case[, up_species] + rpois(length(up_species) * 20, lambda = 30)
+case[, -up_species] <- pmax(0, case[, -up_species] - rpois(length(-up_species) * 20, lambda = 10))
+# Combine groups
+otu_table <- rbind(control, case)
+rownames(otu_table) <- paste0("Sample", 1:40)
+colnames(otu_table) <- paste0("Species", 1:n_species)
+# Metadata
+metadata <- data.frame(
+SampleID = rownames(otu_table),
+Treatment = rep(c("control", "case"), each = 20)
+)
+# Packages
+library(vegan)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(ggpubr)
+metadata <- metadata %>%
+mutate(Treatment = factor(Treatment, levels = c("control", "case")))
+shannon_vec <- diversity(otu_table, index = "shannon")
+alpha_df <- tibble(
+SampleID = rownames(otu_table),
+Shannon = shannon_vec
+) %>%
+left_join(metadata, by = "SampleID")
+alpha_df %>%
+group_by(Treatment) %>%
+summarise(
+n = n(),
+mean = mean(Shannon),
+sd = sd(Shannon),
+median = median(Shannon),
+.groups = "drop"
+)
+## # A tibble: 2 x 5
+## Treatment n mean sd median
+## <fct> <int> <dbl> <dbl> <dbl>
+## 1 control 20 3.32 0.0407 3.31
+## 2 case 20 3.17 0.0752 3.16
+t.test(Shannon ~ Treatment, data = alpha_df)
+##
+## Welch Two Sample t-test
+##
+## data: Shannon by Treatment
+## t = 7.464, df = 29.261, p-value = 2.992e-08
+## alternative hypothesis: true difference in means between group control and group case is not equal to ## 95 percent confidence interval:
+## 0.1036708 0.1818864
+## sample estimates:
+## mean in group control mean in group case
+## 3.315652 3.172874
+wilcox.test(Shannon ~ Treatment, data = alpha_df)
+##
+## Wilcoxon rank sum exact test
+##
+## data: Shannon by Treatment
+## W = 376, p-value = 1.061e-07
+## alternative hypothesis: true location shift is not equal to 0
+p <- ggplot(alpha_df, aes(x = Treatment, y = Shannon, fill = Treatment)) +
+geom_boxplot(outlier.shape = NA, alpha = 0.75) +
+geom_jitter(aes(color = Treatment), width = 0.15, size = 2, alpha = 0.85) +
+stat_compare_means(method = "t.test",
+label.y = max(alpha_df$Shannon) * 1.05) +
+expand_limits(y = max(alpha_df$Shannon) * 1.1) +
+labs(title = "Shannon diversity by treatment",
+x = NULL, y = "Shannon index (H)") +
+theme_bw(base_size = 12) +
+theme(legend.position = "none")
+p
+
+library(vegan)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+# Factor
+metadata <- metadata %>%
+mutate(Treatment = factor(Treatment, levels = c("control", "case")))
+# NMDS with Bray–Curtis
+set.seed(123)
+nmds <- metaMDS(otu_table, distance = "bray", k = 2, trymax = 100, trace = FALSE)
+# Extract sample coordinates
+scores_df <- scores(nmds, display = "sites") %>%
+as.data.frame() %>%
+rownames_to_column("SampleID") %>%
+left_join(metadata, by = "SampleID")
+# Plot
+ggplot(scores_df, aes(x = NMDS1, y = NMDS2, color = Treatment)) +
+geom_point(size = 3) +
+coord_equal() +
+labs(
+title = "NMDS ordination (Bray–Curtis)",
+subtitle = paste0("Stress = ", signif(nmds$stress, 3)),
+x = "NMDS1", y = "NMDS2"
+) +
+theme_bw(base_size = 12)
+library(vegan)
+library(dplyr)
+# Factor
+metadata <- metadata %>%
+mutate(Treatment = factor(Treatment, levels = c("control", "case")))
+# PERMANOVA (Bray–Curtis)
+adonis2(otu_table ~ Treatment, data = metadata, method = "bray")
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+##
+## adonis2(formula = otu_table ~ Treatment, data = metadata, method = "bray")
+## Df SumOfSqs R2 F Pr(>F)
+## Model 1 0.7537 0.39923 25.252 0.001 ***
+## Residual 38 1.1342 0.60077
+## Total 39 1.8879 1.00000
+## ---
+## Signif. codes: 0 ’***’ 0.001 ’**’ 0.01 ’*’ 0.05 ’.’ 0.1 ’ ’ 1
